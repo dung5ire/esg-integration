@@ -41,9 +41,28 @@ curl http://localhost:9933 -H "Content-Type:application/json;charset=utf-8" -d  
 ```
 
 2. Choose your company to get true endpoint
+- Step 1:
+```bash
+cd scripts
+```
+- Step 2: Install dependencies
+
+```bash
+yarn install
+```
+
+- Step 3: Config your company and endpoint in `.env`
+- Step 4:
+
+```bash
+node set_endpoint.js
+```
 
 
-3. Get sustainble score
+
+
+
+3. Get sustainable score
 ```bash
 ./scripts/get_esg.sh -c <company name>
 ```
