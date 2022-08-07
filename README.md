@@ -20,7 +20,6 @@ This command will start the single-node development chain
 
 ## Get ESG score seperately
 
-`Get /esg_score/{company}`
 
 - *company*: Name of the company
 
@@ -33,4 +32,4 @@ This command will start the single-node development chain
 ```
 
 // RESPONSE:
-{"jsonrpc":"2.0","result":<`sustainable score`,"id":1}
+{"jsonrpc":"2.0","result":<`sustainable score`>,"id":1}
