@@ -30,7 +30,10 @@ This command will start the single-node development chain
 ```bash
 ./scripts/get_esg.sh -c <company name>
 ```
-
+### Example company name
+- facebook
+- alphabet
+- microsoft
 ```json
 
 // RESPONSE:
