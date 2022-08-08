@@ -18,10 +18,14 @@ pub mod pallet {
 	use scale_info::TypeInfo;
 	use sp_core::crypto::KeyTypeId;
 	use sp_io;
-	use sp_runtime::offchain::{http, Duration};
+	use sp_runtime::offchain::{http, Duration,storage::{MutateStorageError, StorageRetrievalError, StorageValueRef}};
 	use sp_std::{prelude::*, str};
 
 	use serde::Deserialize;
+	enum TransactionType {
+		Signed,
+		None,
+	}
 
 	pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"esg!");
 
@@ -53,7 +57,7 @@ pub mod pallet {
 	}
 
 	// We are fetching information from the esg oracle endpoint, currently ran on localhost:8080/score
-	const HTTP_REMOTE_REQUEST: &str = "https://testnet.5ire.network/oracle";
+	// const HTTP_REMOTE_REQUEST: &str = "https://testnet.5ire.network/oracle";
 	const FETCH_TIMEOUT_PERIOD: u64 = 3000; // in milli-seconds
 
 	/// EsgInfo is the payload that we expect to receive from the oracle.
@@ -75,6 +79,17 @@ pub mod pallet {
 		type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
 		/// The overarching dispatch call type.
 		type Call: From<Call<Self>>;
+		// Configuration parameters
+
+		/// A grace period after we send transaction.
+		///
+		/// To avoid sending too many transactions, we only attempt to send one
+		/// every `GRACE_PERIOD` blocks. We use Local Storage to coordinate
+		/// sending between distinct runs of this offchain worker.
+		#[pallet::constant]
+		type GracePeriod: Get<Self::BlockNumber>;
+
+
 	}
 
 	#[pallet::pallet]
@@ -132,9 +147,13 @@ pub mod pallet {
 	// the offchain worker entrypoint
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-		fn offchain_worker(_block_number: T::BlockNumber) {
-			let score = Self::fetch_esg_score();
-			if let Err(e) = score {
+		fn offchain_worker(block_number: T::BlockNumber) {
+			let should_send = Self::choose_transaction_type(block_number);
+			let res = match should_send {
+				TransactionType::Signed => Self::fetch_esg_score(),
+				TransactionType::None => Ok(()),
+			};
+			if let Err(e) = res {
 				log::error!("offchain_worker error: {:?}", e);
 			}
 		}
@@ -166,6 +185,62 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+
+		fn choose_transaction_type(block_number: T::BlockNumber) -> TransactionType {
+			/// A friendlier name for the error that is going to be returned in case we are in the grace
+			/// period.
+			const RECENTLY_SENT: () = ();
+
+			// Start off by creating a reference to Local Storage value.
+			// Since the local storage is common for all offchain workers, it's a good practice
+			// to prepend your entry with the module name.
+			let val = StorageValueRef::persistent(b"example_ocw::last_send");
+			// The Local Storage is persisted and shared between runs of the offchain workers,
+			// and offchain workers may run concurrently. We can use the `mutate` function, to
+			// write a storage entry in an atomic fashion. Under the hood it uses `compare_and_set`
+			// low-level method of local storage API, which means that only one worker
+			// will be able to "acquire a lock" and send a transaction if multiple workers
+			// happen to be executed concurrently.
+			let res = val.mutate(|last_send: Result<Option<T::BlockNumber>, StorageRetrievalError>| {
+				match last_send {
+					// If we already have a value in storage and the block number is recent enough
+					// we avoid sending another transaction at this time.
+					Ok(Some(block)) if block_number < block + T::GracePeriod::get() =>
+						Err(RECENTLY_SENT),
+					// In every other case we attempt to acquire the lock and send a transaction.
+					_ => Ok(block_number),
+				}
+			});
+
+			// The result of `mutate` call will give us a nested `Result` type.
+			// The first one matches the return of the closure passed to `mutate`, i.e.
+			// if we return `Err` from the closure, we get an `Err` here.
+			// In case we return `Ok`, here we will have another (inner) `Result` that indicates
+			// if the value has been set to the storage correctly - i.e. if it wasn't
+			// written to in the meantime.
+			match res {
+				// The value has been set correctly, which means we can safely send a transaction now.
+				Ok(_) => {
+					// Depending if the block is even or odd we will send a `Signed` or `Unsigned`
+					// transaction.
+					// Note that this logic doesn't really guarantee that the transactions will be sent
+					// in an alternating fashion (i.e. fairly distributed). Depending on the execution
+					// order and lock acquisition, we may end up for instance sending two `Signed`
+					// transactions in a row. If a strict order is desired, it's better to use
+					// the storage entry for that. (for instance store both block number and a flag
+					// indicating the type of next transaction to send).
+					TransactionType::Signed
+				},
+				// We are in the grace period, we should not send a transaction this time.
+				Err(MutateStorageError::ValueFunctionFailed(RECENTLY_SENT)) => TransactionType::None,
+				// We wanted to send a transaction, but failed to write the block number (acquire a
+				// lock). This indicates that another offchain worker that was running concurrently
+				// most likely executed the same logic and succeeded at writing to storage.
+				// Thus we don't really want to send the transaction, knowing that the other run
+				// already did.
+				Err(MutateStorageError::ConcurrentModification(_)) => TransactionType::None,
+			}
+		}
 		// get the esg_score from the endpoint, emit the esg score in a signed transaction
 		pub fn fetch_esg_score() -> Result<(), Error<T>> {
 			let resp_bytes = Self::fetch_from_endpoint().map_err(|e| {

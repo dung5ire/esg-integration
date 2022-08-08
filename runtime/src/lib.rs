@@ -279,12 +279,17 @@ impl pallet_template::Config for Runtime {
 	type Event = Event;
 }
 
+parameter_types! {
+	pub const GracePeriod : BlockNumber = 10;
+}
 impl esg_fetcher::Config for Runtime {
 	type Event = Event;
 	type Call = Call;
 	// TODO change the authorityId type here.
 	// AuthorityId is the id of the authority for which we fetch and submit the esg score
 	type AuthorityId = esg_fetcher::TestAuthId;
+
+	type GracePeriod = GracePeriod;
 }
 // Submits a transaction with the node's public and signature type. Adheres to the signed extension
 /// format of the chain.
