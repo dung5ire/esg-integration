@@ -75,6 +75,10 @@ node set_endpoint.js
 
 // RESPONSE:
 
-{"jsonrpc":"2.0","result":312312,"id":1}
+Actual sustainable score: 0.047217380
+
+We multiply actual score by 1_000_000_000 to store in onchain storage
+
+{"jsonrpc":"2.0","result":47218380,"id":1}
 
 ```
